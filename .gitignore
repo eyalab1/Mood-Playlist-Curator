@@ -1,0 +1,15 @@
+.env
+.cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+data/*
+!data/app.db
+.streamlit/secrets.toml
+.DS_Store
+.idea/
+.vscode/
+*.egg-info/
+.pytest_cache/

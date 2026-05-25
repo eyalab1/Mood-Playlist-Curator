@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mood-Aware Playlist Curator — Architecture</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #656d76;
+    --accent: #0969da;
+    --border: #d1d9e0;
+    --code-bg: #f6f8fa;
+    --table-stripe: #f6f8fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  h1, h2, h3, h4 {
+    font-weight: 600;
+    line-height: 1.25;
+    margin-top: 1.8em;
+    margin-bottom: 0.6em;
+  }
+  h1 {
+    font-size: 2.1em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3em;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 1.55em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3em;
+  }
+  h3 { font-size: 1.2em; }
+  h4 { font-size: 1.0em; color: var(--muted); }
+  p { margin: 0.6em 0 1em; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 2em 0;
+  }
+  ul, ol { padding-left: 1.6em; }
+  li { margin: 0.25em 0; }
+  em { color: #57606a; }
+  strong { color: #1f2328; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    line-height: 1.45;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.85em;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    font-size: 0.95em;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--code-bg); font-weight: 600; }
+  tbody tr:nth-child(even) td { background: var(--table-stripe); }
+  blockquote {
+    border-left: 4px solid var(--border);
+    color: var(--muted);
+    margin: 1em 0;
+    padding: 0 1em;
+  }
+</style>
+</head>
+<body>
+
+<h1>Mood-Aware Playlist Curator — Architecture</h1>
+
+<p>A reference document covering what the system is, why each piece exists,
+and how the pieces fit together. Read this when you want to refresh your
+mental model.</p>
+
+<hr>
+
+<h2>1. What the system does</h2>
+
+<p>Takes a natural-language mood (e.g. <em>"rainy sunday, melancholy but hopeful"</em>)
+and produces a personalized Spotify playlist with a per-track explanation
+and a 2-3 sentence "emotional arc" summary.</p>
+
+<p>The interesting design choice: instead of one giant LLM call that does
+everything, we use a <strong>multi-agent pipeline</strong> where four small, focused
+agents each handle one job.</p>
+
+<hr>
+
+<h2>2. The pipeline</h2>
+
+<pre><code>  user mood text
+        |
+        v
+  [Mood Interpreter]   -&gt;  structured mood profile
+        |
+        v
+  [Curator]            -&gt;  ~40 candidate tracks
+   (uses tools: spotify_search, genius_lyrics, vector_search)
+        |
+        v
+  [Critic]             -&gt;  ~20 filtered tracks
+   (can ask the Curator to retry with feedback, max 1 retry)
+        |
+        v
+  [Sequencer]          -&gt;  ordered playlist + arc summary
+        |
+        v
+  saved to DB, rendered in UI, optionally pushed to Spotify
+</code></pre>
+
+<p>Each arrow carries <strong>structured JSON</strong>, validated by Pydantic. If any agent
+returns malformed output, the runner retries that agent (up to 2x) with the
+error fed back to the model. If all retries fail, the pipeline fails loudly.</p>
+
+<hr>
+
+<h2>3. Why split into four agents</h2>
+
+<p>Four reasons stacked together:</p>
+
+<ol>
+  <li><strong>Focused prompts produce better output.</strong> LLMs perform much better on
+    narrow tasks than on broad multi-step ones. <em>"Judge these 40 tracks
+    against this mood profile"</em> beats <em>"do everything from mood to playlist."</em></li>
+  <li><strong>Validation at every boundary.</strong> Pydantic catches a malformed mood
+    profile before it ever reaches the Curator. We don't propagate garbage.</li>
+  <li><strong>Different agents have different needs.</strong> The Curator needs Spotify
+    tools; the others don't. The Critic can ask the Curator to re-run with
+    feedback. A mega-agent can't do these loops cleanly.</li>
+  <li><strong>Caching pays off.</strong> When you tweak the Sequencer prompt, the upstream
+    three agents serve from cache. With a mega-agent, every prompt edit
+    re-runs everything.</li>
+</ol>
+
+<p>Cost: more code, more API calls per run. Accepted for a course project
+where we care about observability and quality.</p>
+
+<hr>
+
+<h2>4. Agent contracts</h2>
+
+<p>Every agent has a strict input/output contract enforced by Pydantic.</p>
+
+<h3>Mood Interpreter</h3>
+<p>Input:</p>
+<pre><code>{ "mood_text": "rainy sunday, melancholy", "user_taste_profile": null }
+</code></pre>
+<p>Output:</p>
+<pre><code>{
+  "emotions": ["melancholy", "hopeful"],
+  "energy": 0.3,
+  "valence": 0.4,
+  "tempo_range": [60, 90],
+  "themes": ["rain", "solitude"],
+  "genres_favor": ["folk", "indie"],
+  "genres_avoid": ["edm"],
+  "context": "background reading"
+}
+</code></pre>
+
+<h3>Curator</h3>
+<p>Input: mood profile + user taste profile.<br>
+Tools: <code>spotify_search</code>, <code>genius_lyrics</code> (Day 2), <code>vector_search</code> (Day 2).<br>
+Output:</p>
+<pre><code>{
+  "candidates": [
+    {
+      "spotify_track_id": "...",
+      "name": "...",
+      "artist": "...",
+      "rationale": "...",
+      "audio_features": { },
+      "lyrical_themes": [ ]
+    }
+  ]
+}
+</code></pre>
+<p>Target: 30 to 50 candidates.</p>
+
+<h3>Critic</h3>
+<p>Input: mood profile + candidate pool.<br>
+Output:</p>
+<pre><code>{
+  "kept": ["spotify_track_id"],
+  "rejected": [{"spotify_track_id": "...", "reason": "..."}],
+  "global_warnings": [ ],
+  "request_more": false,
+  "feedback_for_curator": null
+}
+</code></pre>
+<p>If <code>request_more</code> is true, the orchestrator re-runs the Curator with
+<code>feedback_for_curator</code> appended. Maximum 1 retry to bound latency and cost.</p>
+
+<h3>Sequencer</h3>
+<p>Input: kept tracks (with audio features).<br>
+Output:</p>
+<pre><code>{
+  "ordered_tracks": [
+    { "spotify_track_id": "...", "position": 1,
+      "transition_note": "why this follows the previous" }
+  ],
+  "arc_summary": "2 to 3 sentences describing the emotional shape"
+}
+</code></pre>
+
+<hr>
+
+<h2>5. The shared agent runner (agents/base.py)</h2>
+
+<p>All four agents call into one function: <code>run_agent(...)</code>. Each agent
+differs only in its <strong>system prompt</strong>, its <strong>input shape</strong>, its <strong>output
+shape</strong>, and whether it uses <strong>tools</strong>. Everything else (API call, JSON
+parsing, retry, caching, logging) is shared.</p>
+
+<h3>What run_agent does, top to bottom</h3>
+
+<ol>
+  <li><strong>Hash</strong> the input and check <code>agent_traces</code> for a previous run with the
+    same hash. If found, return that cached output, skip the API call.</li>
+  <li><strong>Call Claude</strong> with the agent's system prompt + the user input.</li>
+  <li>If the agent has tools: <strong>run the tool loop</strong> (see below). Otherwise
+    parse the response directly.</li>
+  <li><strong>Validate</strong> the final response with the agent's Pydantic output model.</li>
+  <li>If validation fails, <strong>retry up to 2 times</strong> with the error fed back to
+    the model as the next user message. If retries exhausted, raise.</li>
+  <li><strong>Save a trace row</strong> to <code>agent_traces</code>: input, output, tokens used,
+    latency, timestamp.</li>
+</ol>
+
+<h3>Why each piece exists</h3>
+
+<p><strong>JSON instead of free text.</strong> Our code is the consumer, not a human. The
+orchestrator needs to pass typed data between agents.</p>
+
+<p><strong>Pydantic validation.</strong> <em>Valid JSON is not the same as correct JSON.</em>
+A model might return <code>"emotions": "melancholy"</code> (string) when we asked for
+a list of strings. Pydantic catches this at the boundary, with a clear
+error message naming the bad field. We never propagate bad data to the
+next agent.</p>
+
+<p><strong>Retry with error feedback.</strong> When validation fails, we feed the parser's
+error back to Claude in a new user message. LLMs are very good at fixing
+their own mistakes when shown the specific error. Bare retries without
+feedback recover ~30-40% of failures. Retries <em>with</em> the error included
+recover ~90%+.</p>
+
+<p><strong>Caching keyed by <code>(agent_name, hash(user_input))</code>.</strong> During dev you'll
+run the pipeline 50-100 times. Same inputs should not produce paid API
+calls every time. The cache key deliberately excludes the system prompt
+so prompt tweaks don't invalidate everything. Tradeoff: when you change
+a system prompt, you have to bypass the cache (<code>use_cache=False</code>) or
+wipe <code>agent_traces</code>, or the model will silently return the old output.</p>
+
+<p><strong>Trace logging.</strong> Same data, two uses: (1) <strong>caching</strong> — skip duplicates.
+(2) <strong>debugging</strong> — when a playlist is bad, you can read the exact input
+and output of each agent and pinpoint which step broke. Free side effects
+of the same table: token counts (cost tracking) and latency (perf
+tracking).</p>
+
+<h3>The tool loop (Curator only)</h3>
+
+<p>The LLM does not run code. It can only ask. The Curator needs to actually
+search Spotify, so we declare a <code>spotify_search</code> tool. The choreography:</p>
+
+<pre><code>1. our code -&gt; Anthropic API:  "here's the mood profile, here are your tools"
+2. Anthropic API -&gt; our code:  "I want spotify_search(query='rainy day', limit=10)"
+                                (stop_reason = tool_use)
+3. our code -&gt; Spotify API:    GET /v1/search?q=rainy+day&amp;limit=10
+4. Spotify API -&gt; our code:    [ list of tracks ]
+5. our code -&gt; Anthropic API:  "here are the results"
+6. Anthropic API -&gt; our code:  final JSON answer
+                                (stop_reason = end_turn)
+</code></pre>
+
+<p>Three round trips, two different APIs. Our Python code is the middleman.
+Claude never touches Spotify; Spotify never knows Claude exists.</p>
+
+<p>The loop is capped at 8 tool iterations so a confused model can't burn
+money in an infinite loop.</p>
+
+<hr>
+
+<h2>6. The two kinds of "energy"</h2>
+
+<p>A common point of confusion. The same word means two different things
+depending on where the number came from.</p>
+
+<table>
+  <thead>
+    <tr><th>Number</th><th>Source</th><th>How it was produced</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>target.energy = 0.3</code></td>
+      <td>Mood Interpreter (Claude)</td>
+      <td>LLM mapping the words "rainy sunday melancholy" onto a 0 to 1 scale. Language to numbers translation. No audio involved.</td>
+    </tr>
+    <tr>
+      <td><code>track.energy = 0.27</code> ("Skinny Love")</td>
+      <td>Spotify audio analysis</td>
+      <td>Spotify's signal-processing code analyzes the actual MP3 (tempo, loudness, timbre, frequency content) and outputs a single number. Computed once when the track is uploaded.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The Critic compares the two and says "0.27 is close to 0.3 -&gt; good fit."</p>
+
+<p>The LLM does the language work. Spotify does the audio work. We glue them
+together.</p>
+
+<p><strong>Heads up:</strong> Spotify deprecated the <code>/audio-features</code> endpoint for new
+apps in 2024. If our app can't access it, we lose the right-hand column.
+The agents then reason from track names, artists, and the LLM's general
+knowledge of artists and songs (Bon Iver = melancholy folk, etc.). Less
+precise, still functional.</p>
+
+<hr>
+
+<h2>7. The database (db.py, SQLite)</h2>
+
+<p>Single file at <code>data/app.db</code>. No server, zero setup. Good enough for a
+course project.</p>
+
+<p>Tables:</p>
+
+<table>
+  <thead>
+    <tr><th>Table</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>users</code></td><td>Spotify login info (Day 2 OAuth)</td></tr>
+    <tr><td><code>playlists</code></td><td>One row per generated playlist (mood prompt, arc summary)</td></tr>
+    <tr><td><code>playlist_tracks</code></td><td>Tracks of each playlist with per-track explanation</td></tr>
+    <tr><td><code>tracks</code></td><td>Track metadata cache: audio features, lyrics, embeddings (RAG corpus)</td></tr>
+    <tr><td><strong><code>agent_traces</code></strong></td><td>Every single LLM call: input, output, tokens, latency</td></tr>
+    <tr><td><code>taste_profile</code></td><td>A user's listening preferences for personalization</td></tr>
+    <tr><td><code>feedback</code></td><td>User actions (skip, save, thumbs up/down)</td></tr>
+    <tr><td><code>eval_runs</code>, <code>eval_results</code></td><td>Day 3 evaluation runs</td></tr>
+  </tbody>
+</table>
+
+<p><code>agent_traces</code> is the most important table. It does two jobs:</p>
+<ol>
+  <li><strong>Cache</strong> — <code>find_cached_trace(agent_name, input_hash)</code> looks up a prior
+    row before each call.</li>
+  <li><strong>Debugging / observability</strong> — every input and output is recorded for
+    inspection, plus token counts and latency.</li>
+</ol>
+
+<hr>
+
+<h2>8. The Spotify client (spotify_client.py)</h2>
+
+<p>Wraps the Spotify Web API. Two methods we use:</p>
+
+<ul>
+  <li><code>search(query, limit) -&gt; list[dict]</code> — searches the public catalog, returns
+    tracks with id, name, artist, album. Called by the Curator's
+    <code>spotify_search</code> tool.</li>
+  <li><code>audio_features(track_ids) -&gt; list[dict | None]</code> — Spotify's per-track
+    numerical features (energy, valence, tempo, etc.). Used by the Critic
+    and Sequencer. May return None per track if the endpoint is blocked.</li>
+</ul>
+
+<p>Auth: <strong>Client Credentials flow</strong> for Day 1 (no user login needed for
+public catalog access). <strong>Authorization Code (OAuth)</strong> added Day 2 for
+saving playlists to a user's real account.</p>
+
+<hr>
+
+<h2>9. The orchestrator (orchestrator.py)</h2>
+
+<p>Plain Python, not a framework. Runs the four agents in sequence:</p>
+
+<pre><code>profile = mood_interpreter.run(mood_text, taste_profile)
+candidates = curator.run(profile, taste_profile)
+critique = critic.run(profile, candidates)
+if critique.request_more:
+    candidates += curator.run(profile, taste_profile,
+                              feedback=critique.feedback_for_curator)
+    critique = critic.run(profile, candidates)
+kept = [c for c in candidates if c.id in critique.kept]
+playlist = sequencer.run(kept)
+save_playlist(...)
+</code></pre>
+
+<p>That's it. Every agent call is automatically traced. Every agent's output
+is automatically validated. Every agent's input automatically hits the
+cache first.</p>
+
+<hr>
+
+<h2>10. Tech stack</h2>
+
+<table>
+  <thead>
+    <tr><th>Layer</th><th>Choice</th><th>Why</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Language</td><td>Python 3.11+</td><td>LLM ecosystem; fast iteration</td></tr>
+    <tr><td>UI</td><td>Streamlit</td><td>Single-file UI, handles OAuth easily</td></tr>
+    <tr><td>DB</td><td>SQLite + sqlite-vec</td><td>Zero setup, vector search for free</td></tr>
+    <tr><td>LLM</td><td>Anthropic Claude (Haiku dev, Sonnet final eval)</td><td>Tool use, JSON output, cost balance</td></tr>
+    <tr><td>Embeddings</td><td>OpenAI text-embedding-3-small</td><td>Cheap, good enough</td></tr>
+    <tr><td>External</td><td>Spotify Web API, Genius API</td><td>Catalog + lyrics</td></tr>
+    <tr><td>Deploy</td><td>Streamlit Community Cloud</td><td>Free</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>11. Build plan recap</h2>
+
+<p>Day 1: CLI end-to-end (no UI yet). Scaffold, db, spotify client, base
+runner, four agents, orchestrator, smoke test.</p>
+
+<p>Day 2: RAG corpus + Streamlit UI + Spotify OAuth.</p>
+
+<p>Day 3: Evaluation harness + ablations + plots + writeup + deploy.</p>
+
+<hr>
+
+<h2>12. Key principles to keep in mind</h2>
+
+<ul>
+  <li><strong>Don't trust LLM output.</strong> Validate at every boundary.</li>
+  <li><strong>Show the model its mistakes.</strong> Don't retry blind — feed the error back.</li>
+  <li><strong>Cache aggressively during dev, bypass for final eval.</strong></li>
+  <li><strong>Trace everything.</strong> Same data debugs problems and powers caching.</li>
+  <li><strong>The LLM is a reasoning controller, not an executor.</strong> It decides; we run.</li>
+  <li><strong>Each agent has a narrow contract.</strong> That's where the quality comes from.</li>
+</ul>
+
+</body>
+</html>

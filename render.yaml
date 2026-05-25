@@ -1,0 +1,23 @@
+# Render Blueprint for the Mood Playlist Curator.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo.
+# Render reads this file, builds the service, and prompts you to paste the
+# secret values (the keys marked sync: false). Nothing secret lives in here.
+services:
+  - type: web
+    name: mood-playlist-curator
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Secrets: Render will prompt for these in the dashboard.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
