@@ -5,7 +5,7 @@
 **Instructor:** Mikael Gorsky
 **Date:** June 2026
 
-**Live demo:** https://mood-playlist-curator.onrender.com (no login required; first load can take ~50s while the free host wakes up)
+**Live demo:** link shared privately with the instructor (no login required; first load can take ~50s while the free host wakes up)
 **Repository:** https://github.com/eyalab1/Mood-Playlist-Curator
 
 
