@@ -1,4 +1,4 @@
-# Mood-Aware Playlist Curator, Final Report
+# Mood-Playlist Curator, Final Report
 
 **Author:** Eyal Abisdris
 **Course:** LLM-Augmented Software Practice
