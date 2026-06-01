@@ -1,0 +1,109 @@
+{
+  "prompts": [
+    {
+      "id": "heartbreak_sad",
+      "mood_text": "she left last night and i can't stop replaying it. just want to sit in the dark for a while",
+      "expected_themes": ["heartbreak", "loneliness", "sadness", "loss"],
+      "should_avoid_genres": ["edm", "dance pop", "house"],
+      "notes": "Slow, sad, low energy. Should not be upbeat or danceable."
+    },
+    {
+      "id": "workout_energy",
+      "mood_text": "leg day at the gym, need stuff that makes me want to lift a car",
+      "expected_themes": ["power", "motivation", "intensity", "drive"],
+      "should_avoid_genres": ["ambient", "lo-fi", "sleep"],
+      "notes": "High energy, fast tempo, driving beat."
+    },
+    {
+      "id": "deep_focus",
+      "mood_text": "got like 6 hours to finish this project, need to lock in, nothing too distracting",
+      "expected_themes": ["concentration", "calm", "focus", "steady"],
+      "should_avoid_genres": ["death metal", "hardcore", "trap"],
+      "notes": "Low-key, minimal, steady. Nothing jarring."
+    },
+    {
+      "id": "party_euphoric",
+      "mood_text": "PRE GAME!! people coming over in an hour, get the energy way up",
+      "expected_themes": ["celebration", "joy", "dancing", "energy"],
+      "should_avoid_genres": ["ambient", "sleep", "classical"],
+      "notes": "Upbeat, danceable, high valence."
+    },
+    {
+      "id": "nostalgia",
+      "mood_text": "found a box of old photos from high school today and now im in my feels about how fast it all went",
+      "expected_themes": ["nostalgia", "memory", "longing", "bittersweet"],
+      "should_avoid_genres": ["edm", "trap", "metal"],
+      "notes": "Warm, reflective, mid-tempo."
+    },
+    {
+      "id": "rainy_melancholy",
+      "mood_text": "rainy sunday, melancholy but hopeful, watching the window with a coffee",
+      "expected_themes": ["melancholy", "solitude", "hope", "reflection"],
+      "should_avoid_genres": ["edm", "house", "hard rock"],
+      "notes": "Soft, introspective, gentle lift toward hope."
+    },
+    {
+      "id": "rage_anger",
+      "mood_text": "so done with everything today. need to scream into a pillow but make it a playlist",
+      "expected_themes": ["anger", "frustration", "defiance", "intensity"],
+      "should_avoid_genres": ["lo-fi", "ambient", "easy listening"],
+      "notes": "Aggressive, loud, high energy."
+    },
+    {
+      "id": "romantic",
+      "mood_text": "cooking dinner for the person i love tonight, want it warm and a little romantic",
+      "expected_themes": ["love", "romance", "intimacy", "tenderness"],
+      "should_avoid_genres": ["death metal", "hardcore", "punk"],
+      "notes": "Warm, slow, sensual."
+    },
+    {
+      "id": "road_trip",
+      "mood_text": "6 hour drive tomorrow, just me and the highway, windows down energy",
+      "expected_themes": ["freedom", "adventure", "open road", "optimism"],
+      "should_avoid_genres": ["ambient", "classical", "sleep"],
+      "notes": "Mid to high energy, sing-along friendly."
+    },
+    {
+      "id": "anxious_night",
+      "mood_text": "its 3am and my brain wont shut up, everything feels like too much right now",
+      "expected_themes": ["anxiety", "restlessness", "insomnia", "unease"],
+      "should_avoid_genres": ["dance pop", "edm", "disco"],
+      "notes": "Tense, dark, atmospheric."
+    },
+    {
+      "id": "hopeful_newstart",
+      "mood_text": "first day at the new job tomorrow, terrified but kind of excited too?",
+      "expected_themes": ["hope", "new beginning", "optimism", "courage"],
+      "should_avoid_genres": ["death metal", "doom metal", "hardcore"],
+      "notes": "Uplifting, building energy."
+    },
+    {
+      "id": "lonely_newcity",
+      "mood_text": "just moved cities for work and i dont know a single person here, kinda lonely ngl",
+      "expected_themes": ["loneliness", "isolation", "longing", "displacement"],
+      "should_avoid_genres": ["edm", "dance pop", "disco"],
+      "notes": "Quiet, sparse, reflective."
+    },
+    {
+      "id": "sunday_chill",
+      "mood_text": "slow sunday, coffee and sunlight through the window, no plans, total bliss",
+      "expected_themes": ["relaxation", "contentment", "ease", "warmth"],
+      "should_avoid_genres": ["metal", "hardcore", "trap"],
+      "notes": "Mellow, soft, low energy."
+    },
+    {
+      "id": "confident_empowered",
+      "mood_text": "big presentation today and i need to walk in feeling completely unstoppable",
+      "expected_themes": ["confidence", "empowerment", "swagger", "strength"],
+      "should_avoid_genres": ["ambient", "classical", "lo-fi"],
+      "notes": "Bold, groovy, strong."
+    },
+    {
+      "id": "bittersweet_goodbye",
+      "mood_text": "last night before everyone leaves for uni, happy were together but sad its ending",
+      "expected_themes": ["bittersweet", "friendship", "change", "nostalgia"],
+      "should_avoid_genres": ["death metal", "hardcore", "trap"],
+      "notes": "Warm but wistful, mid-tempo."
+    }
+  ]
+}

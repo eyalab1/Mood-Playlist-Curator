@@ -71,6 +71,21 @@ class SpotifyClient:
             "genres": genres,
         }
 
+    def track_genres(self, track_id: str) -> list[str]:
+        """Return the primary artist's genre tags for a given track id, or
+        an empty list if anything fails. Used by the evaluation runner to
+        enrich tracks that did not come from the curated RAG corpus."""
+        try:
+            track = self.sp.track(track_id)
+            artist_id = track["artists"][0]["id"]
+            return self.sp.artist(artist_id).get("genres", [])
+        except spotipy.SpotifyException as e:
+            logger.warning("track_genres failed for %s: %s", track_id, e)
+            return []
+        except Exception as e:  # noqa: BLE001 - never break eval over a lookup
+            logger.warning("track_genres unexpected error for %s: %s", track_id, e)
+            return []
+
     def audio_features(self, track_ids: list[str]) -> list[dict | None]:
         """Return audio features per track, or None for tracks where the
         endpoint failed. Spotify deprecated this endpoint for new apps in

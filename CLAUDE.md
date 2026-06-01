@@ -4,32 +4,46 @@
 Build a web app that takes a natural-language mood description (e.g., "rainy
 Sunday, melancholy but hopeful") and generates a personalized Spotify playlist
 with per-track explanations, using a multi-agent LLM pipeline. This is a
-course project for an LLM course. Timeline: 2-3 days.
+course project for an LLM course. Timeline: roughly two weeks (beta in week one, final the next).
 
 ## Hard constraints
-- Timeline: 2-3 days. Do not add features beyond this spec without asking.
+- Timeline: ~2 weeks. Do not add features beyond this spec without asking.
 - This is a course project, not production. Keep code simple and readable.
 - Never use the em dash character in any text, comments, or UI copy.
 - Do not over-engineer. Prefer the dumbest thing that works.
 
+## Changes from the original plan (kept for history)
+The stack below reflects what was actually built. It diverged from the first
+draft in a few deliberate ways:
+- App framework is FastAPI + a static HTML/Tailwind page, not Streamlit.
+  Streamlit looked too plain for the desired UI.
+- Embeddings use Voyage AI, not OpenAI (OpenAI required a paid prepay; Voyage
+  has a free tier).
+- Vector search uses numpy cosine similarity, not the sqlite-vec extension
+  (simpler for a few hundred vectors).
+- Deployment is Render, not Streamlit Community Cloud (FastAPI cannot run on
+  Streamlit Cloud).
+- Spotify OAuth and "save to Spotify" were dropped in favor of Spotify embed
+  players, to fit the timeline. Spotify is used in client-credentials mode.
+
 ## Locked tech stack (do not change without asking the user)
 - Language: Python 3.11+
-- App framework: Streamlit (single-file UI, handles OAuth flow easily)
-- Database: SQLite (zero setup) with sqlite-vec extension for embeddings
+- Backend / API: FastAPI + Uvicorn
+- Frontend: single static page, HTML + Tailwind (CDN) + vanilla JS
+- Database: SQLite (zero setup); vector search via numpy cosine similarity
 - LLM provider: Anthropic Claude
-  - Default model for agents: claude-sonnet-4-6
-  - Cheap model for dev/testing: claude-haiku-4-5-20251001
-- Embeddings: OpenAI text-embedding-3-small
-- External APIs: Spotify Web API, Genius API
-- Deployment: Streamlit Community Cloud (free)
+  - Default model for agents: claude-sonnet-4-6 (final eval)
+  - Cheap model for dev/testing and the live beta: claude-haiku-4-5-20251001
+- Embeddings: Voyage AI (voyage-3.5)
+- External APIs: Spotify Web API (search), Genius API (corpus lyrics)
+- Deployment: Render (free tier)
 
 ## User-provided secrets (in a .env file at project root)
 - ANTHROPIC_API_KEY
-- OPENAI_API_KEY (embeddings only)
+- VOYAGE_API_KEY (embeddings)
 - SPOTIFY_CLIENT_ID
 - SPOTIFY_CLIENT_SECRET
-- SPOTIFY_REDIRECT_URI (default: http://localhost:8501/callback)
-- GENIUS_ACCESS_TOKEN
+- GENIUS_ACCESS_TOKEN (only needed when rebuilding the corpus; not used at runtime)
 
 If any are missing when starting work, pause and ask the user to obtain them.
 Provide step-by-step instructions for getting each key.
@@ -45,16 +59,16 @@ focused system prompt and Pydantic-validated JSON output.
   [Mood Interpreter] -> structured mood profile
         |
         v
-  [Curator] (tools: spotify_search, genius_lyrics, vector_search)
+  [Curator] (tools: spotify_search, vector_search)
         |
-        v  (candidate pool of ~40 tracks)
+        v  (candidate pool of ~30 to 50 tracks)
   [Critic] -> filtered list, can request Curator re-run with feedback
         |
-        v  (final ~20 tracks)
+        v  (final 15 to 25 tracks)
   [Sequencer] -> ordered playlist with arc summary
         |
         v
-  Save to user's Spotify, render in UI
+  Web UI with embedded Spotify players
 ```
 
 Orchestration is plain Python code (not LangGraph). Every agent input/output
@@ -65,32 +79,39 @@ is logged to the agent_traces table.
 mood-playlist-curator/
   CLAUDE.md                     (this file)
   README.md
+  REPORT.md                     (final writeup)
+  SPEC.md                       (specification doc)
   .env.example
   .gitignore
   requirements.txt
-  app.py                        (Streamlit entry point + UI)
+  render.yaml                   (Render deploy blueprint)
+  server.py                     (FastAPI backend: serves the page + /api/generate)
+  static/index.html             (HTML + Tailwind + vanilla JS, the web UI)
+  app.py                        (deprecated Streamlit prototype, kept for history)
   config.py                     (env vars, model names)
   db.py                         (SQLite setup, schema, helpers)
-  spotify_client.py             (OAuth + Spotify API wrapper)
-  genius_client.py              (Genius lyrics fetcher)
-  embeddings.py                 (OpenAI embedding wrapper)
+  spotify_client.py             (Spotify Web API wrapper, client credentials only)
+  genius_client.py              (Genius lyrics fetcher, used only by corpus build)
+  embeddings.py                 (Voyage embedding wrapper)
   agents/
     __init__.py
-    base.py                     (shared agent runner, JSON parsing, tracing)
+    base.py                     (shared agent runner: tool loop, JSON, cache, tracing)
     mood_interpreter.py
-    curator.py
+    curator.py                  (with_rag and without_rag prompts)
     critic.py
     sequencer.py
-  orchestrator.py               (runs the pipeline, handles feedback loop)
+  orchestrator.py               (pipeline; use_rag flag for ablation)
   rag/
-    build_corpus.py             (one-time script: fetch lyrics, embed, store)
-    retriever.py
+    seed_tracks.py              (curated seed list by mood)
+    build_corpus.py             (one-time: fetch lyrics, embed with Voyage, store)
+    retriever.py                (vector_search by numpy cosine similarity)
   eval/
-    test_set.json               (mood prompts + reference data)
-    run_eval.py
-    metrics.py
+    test_set.json               (15 mood prompts + reference data)
+    metrics.py                  (artist_diversity, theme_coverage, expl_quality, mood_fit)
+    run_eval.py                 (the ablation runner)
+    plot_results.py             (saves PNGs in eval/plots/)
   data/
-    app.db                      (gitignored)
+    app.db                      (SQLite incl. the prebuilt corpus; committed)
 ```
 
 ## Database schema (SQLite)
@@ -140,9 +161,9 @@ Output:
 ### Curator
 Input: mood profile + taste profile.
 Tools available (function calling):
-  - `spotify_search(query, limit)` -> tracks with audio features
-  - `genius_lyrics(track_id)` -> lyrics text
+  - `spotify_search(query, limit)` -> tracks (id, name, artist, album)
   - `vector_search(query_text, k)` -> semantically similar tracks from corpus
+(`genius_lyrics` is used only by the one-time corpus build, not as a live tool.)
 
 Output:
 ```json
@@ -153,13 +174,14 @@ Output:
       "name": "str",
       "artist": "str",
       "rationale": "str",
-      "audio_features": {},
       "lyrical_themes": ["str"]
     }
   ]
 }
 ```
-Target: 30 to 50 candidates.
+Target: 30 to 50 candidates. The original spec also included `audio_features`
+per candidate; this was removed because Spotify deprecated `/audio-features`
+for new apps.
 
 ### Critic
 Input: mood profile + candidate pool.
@@ -178,7 +200,7 @@ If `request_more` is true, orchestrator re-runs Curator with
 latency and cost.
 
 ### Sequencer
-Input: kept tracks (with audio features).
+Input: kept tracks (name, artist, rationale).
 Output:
 ```json
 {
@@ -208,47 +230,53 @@ Output:
 
 Milestone: one working playlist generated from CLI, traces in DB.
 
-### Day 2: RAG + Streamlit UI + Spotify OAuth
+### Day 2 (week 1): RAG + web UI
 1. rag/build_corpus.py: fetch lyrics for ~300-500 popular tracks via Genius,
-   embed with OpenAI, store in tracks table
-2. rag/retriever.py: vector search over corpus
+   embed with Voyage, store in tracks table
+2. rag/retriever.py: vector search over corpus (numpy cosine)
 3. Wire vector_search tool into Curator
-4. Streamlit app.py:
-   - Spotify OAuth (Authorization Code flow)
-   - Mood input box
-   - Run pipeline, show playlist with explanations
-   - "Save to Spotify" button
-   - Show arc summary
-5. Multi-turn refinement: text box for follow-up, re-run pipeline with
-   previous playlist + refinement instruction in context
+4. FastAPI server.py + static/index.html:
+   - Mood input box, "Generate" button
+   - Playlist rendered with explanations + embedded Spotify players (no OAuth)
+   - Arc summary shown above the tracks
+5. Multi-turn refinement: text box for follow-up; combined prompt re-runs the pipeline
 
-Milestone: a friend with a Spotify account can log in and generate a
-saveable playlist.
+Milestone: a user can open the URL and generate a playlist through the web UI.
 
-### Day 3: Evaluation + polish + writeup
+### Day 3 (week 2): Evaluation + polish + writeup
 1. eval/test_set.json: 15 mood prompts with reference data
-2. eval/metrics.py: mood_fit (audio feature distance), diversity
-   (unique artists/genres), theme coverage, forbidden genre rate
-3. eval/run_eval.py: ablations
-   - full pipeline vs. single-agent baseline
-   - with-RAG vs. without-RAG
-   - sonnet vs. haiku
-4. Generate plots (matplotlib) of results
-5. README.md with setup instructions, screenshots, results
-6. Deploy to Streamlit Community Cloud
-7. Final report (separate doc)
+2. eval/metrics.py: artist_diversity, theme_coverage, explanation_quality,
+   mood_fit (lyric-embedding substitute for the original audio-feature mood_fit,
+   which is no longer computable). The genre-based metrics from the spec
+   (genre_diversity, forbidden_genre_rate) were dropped after Spotify also
+   restricted the artist genres field for new apps.
+3. eval/run_eval.py: with-RAG vs without-RAG ablation across all 15 prompts.
+   The Sonnet-vs-Haiku and single-agent-baseline ablations were dropped to
+   stay within the Anthropic budget.
+4. eval/plot_results.py: matplotlib plots saved to eval/plots/
+5. README.md with setup instructions
+6. Deploy to Render (FastAPI + static page)
+7. Final report (REPORT.md)
 
 ## Evaluation harness details
-Metrics:
-- `mood_fit`: 1 - cosine_distance(target_audio_profile, mean_track_features)
+Metrics actually computed (four):
 - `artist_diversity`: unique_artists / total_tracks
-- `genre_diversity`: unique_genres / total_tracks
-- `theme_coverage`: fraction of expected_themes mentioned in explanations
-- `forbidden_genre_rate`: fraction of tracks in should_avoid_genres
-- `explanation_quality`: heuristic (length, mentions audio features, mentions
-  lyrics) plus optional human rating on a sample
+- `theme_coverage`: fraction of `expected_themes` that appear in the track
+  explanations (case-insensitive substring)
+- `explanation_quality`: heuristic average of length / lyric-vocab mentions /
+  audio-vocab mentions
+- `mood_fit`: average cosine similarity between the embedded mood text and
+  each track's lyric embedding (Voyage). Substituted for the spec's original
+  audio-feature-distance metric, which became uncomputable when Spotify
+  deprecated `/audio-features` for new apps.
 
-For each ablation, run all 15 prompts, average metrics, plot bar chart.
+Metrics dropped from the original spec:
+- `genre_diversity`, `forbidden_genre_rate`: Spotify restricted the artist
+  `genres` field for new apps; no reliable per-track genre source remained.
+
+The runner also reports cross-prompt unique-track counts per configuration,
+which surfaces the corpus-size trade-off in RAG mode. All 15 prompts run on
+both configurations; metrics are averaged.
 
 ## Important rules for Claude Code
 - Always validate every LLM JSON output with Pydantic models.
@@ -259,23 +287,19 @@ For each ablation, run all 15 prompts, average metrics, plot bar chart.
   claude-sonnet-4-6 for the final eval run only.
 - No em dashes in code comments, docstrings, UI copy, or any output.
 - Keep functions small and explicit. No premature abstraction.
-- Do not commit .env or data/app.db.
+- Do not commit `.env`. `data/app.db` IS committed deliberately so the prebuilt corpus ships with the deploy.
 - Do not add features (auth providers, payment, social sharing, etc.)
   beyond what is in this spec.
 
 ## Things requiring user confirmation before action
 - Creating the Spotify Developer app (user does this in browser, you guide)
-- Adding tester Spotify emails to the developer dashboard
-- Deploying publicly to Streamlit Cloud
-- Any LLM run that will cost more than $1 (e.g., full eval with Sonnet)
+- Deploying publicly to Render
+- Any LLM run that will cost more than $1 (e.g., the full eval)
 - Installing system-level dependencies
 
 ## What the user must do manually (Claude cannot do these)
 1. Create Spotify Developer app at developer.spotify.com/dashboard
-2. Add redirect URI to Spotify app settings
-3. Whitelist tester Spotify emails in Spotify dashboard (Development Mode
-   limit is 25 users)
-4. Get Genius API token at genius.com/api-clients
-5. Get Anthropic key at console.anthropic.com
-6. Get OpenAI key at platform.openai.com
-7. Push to GitHub and connect to Streamlit Cloud for deployment
+2. Get Genius API token at genius.com/api-clients (only needed to rebuild the corpus)
+3. Get Anthropic key at console.anthropic.com
+4. Get Voyage API key at dash.voyageai.com
+5. Push to GitHub and deploy via Render (render.com), using `render.yaml` as a Blueprint

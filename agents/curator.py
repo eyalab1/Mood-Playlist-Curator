@@ -127,24 +127,65 @@ Final output: a single JSON object matching:
 No markdown, no prose outside the JSON object."""
 
 
+# Variant used by the evaluation ablation when RAG is disabled. The Curator
+# is given only spotify_search and is asked to widen the keyword net to
+# compensate for the missing corpus tool.
+SYSTEM_PROMPT_NO_RAG = """You are a music curator agent. Given a mood profile, build a candidate pool of 30 to 50 tracks that fit the mood, using Spotify keyword search only.
+
+Tool:
+- spotify_search(query, limit): keyword search over all of Spotify. Use this to find candidate tracks.
+
+Process:
+1. Call spotify_search 4 to 7 times targeting different angles of the mood (themes, artists, subgenres, eras). Wider nets beat one big search.
+2. Combine results into one candidate pool. Do not exceed 50.
+3. Only include tracks whose IDs actually came back from a spotify_search call. Never invent IDs.
+
+For each candidate include:
+- spotify_track_id (exact id from a search result)
+- name, artist (from the same search result)
+- rationale: 1 to 2 sentences on why this track fits the mood profile, referencing the emotions, themes, energy, or genres from the profile.
+- lyrical_themes: 1 to 4 short labels for themes you expect the lyrics touch on, based on what you know about the song.
+
+Aim for 30 to 50 candidates. Favor variety across artists and subgenres within the mood. Respect genres_avoid strictly.
+
+If the user input includes a `feedback` field, treat it as critic feedback on a previous attempt and adjust accordingly.
+
+Final output: a single JSON object matching:
+{ "candidates": [ { spotify_track_id, name, artist, rationale, lyrical_themes }, ... ] }
+
+No markdown, no prose outside the JSON object."""
+
+
 def run(
     mood_profile: dict,
     user_taste_profile: dict | None = None,
     feedback: str | None = None,
     playlist_id: int | None = None,
     use_cache: bool = True,
+    use_rag: bool = True,
 ) -> CuratorOutput:
+    """Run the Curator. Pass use_rag=False to disable the vector_search tool
+    (used by the evaluation ablation). The cache key differs between modes,
+    so the two configurations do not collide."""
     user_input = {
         "mood_profile": mood_profile,
         "user_taste_profile": user_taste_profile,
         "feedback": feedback,
     }
+    if use_rag:
+        tools = TOOLS
+        system_prompt = SYSTEM_PROMPT
+        agent_name = "curator"
+    else:
+        tools = [t for t in TOOLS if t["name"] != "vector_search"]
+        system_prompt = SYSTEM_PROMPT_NO_RAG
+        agent_name = "curator_no_rag"
     return run_agent(
-        agent_name="curator",
-        system_prompt=SYSTEM_PROMPT,
+        agent_name=agent_name,
+        system_prompt=system_prompt,
         user_input=user_input,
         output_model=CuratorOutput,
-        tools=TOOLS,
+        tools=tools,
         tool_dispatcher=_dispatch,
         playlist_id=playlist_id,
         use_cache=use_cache,

@@ -77,7 +77,7 @@ def run_agent(
     tool_dispatcher: Callable[[str, dict], object] | None = None,
     playlist_id: int | None = None,
     max_retries: int = 2,
-    max_tool_iterations: int = 8,
+    max_tool_iterations: int = 15,
     use_cache: bool = True,
     max_tokens: int = 4096,
 ) -> T:

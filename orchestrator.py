@@ -24,11 +24,15 @@ def generate_playlist(
     persist: bool = True,
     use_cache: bool = True,
     on_step: Callable[[str], None] | None = None,
+    use_rag: bool = True,
 ) -> dict:
     """Run the four-agent pipeline. Returns the final playlist as a dict.
 
     on_step, if given, is called with a short label before each agent runs.
     The UI uses it to show live progress; the CLI leaves it None.
+
+    use_rag toggles the Curator's vector_search tool. Defaults to True; the
+    evaluation ablation calls with use_rag=False to compare configurations.
     """
 
     def step(label: str) -> None:
@@ -43,7 +47,7 @@ def generate_playlist(
 
     step("Curating candidate tracks")
     curated = curator.run(
-        profile_dump, user_taste_profile, use_cache=use_cache
+        profile_dump, user_taste_profile, use_cache=use_cache, use_rag=use_rag
     )
     candidates = list(curated.candidates)
 
@@ -62,6 +66,7 @@ def generate_playlist(
             user_taste_profile,
             feedback=critique.feedback_for_curator,
             use_cache=use_cache,
+            use_rag=use_rag,
         )
         # Avoid duplicate ids when extending the pool.
         seen = {c.spotify_track_id for c in candidates}
