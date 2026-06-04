@@ -1,4 +1,4 @@
-# Mood-Aware Playlist Curator
+# Mood-Playlist Curator
 
 Turn a natural-language mood into a Spotify playlist using a multi-agent LLM
 pipeline with lyrics-based RAG. You describe a feeling ("rainy sunday,
